@@ -1,0 +1,13 @@
+{
+  "name": "studentos-root",
+  "version": "1.0.0",
+  "private": true,
+  "description": "StudentOS — Daily Activity & Student Life Management System",
+  "scripts": {
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm run dev",
+    "test": "cd server && npm test",
+    "build": "cd client && npm run build",
+    "install:all": "cd server && npm install && cd ../client && npm install"
+  }
+}

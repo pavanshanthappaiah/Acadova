@@ -1,0 +1,241 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: theme('colors.paper.DEFAULT');
+    color: theme('colors.ink.900');
+    font-family: theme('fontFamily.sans');
+  }
+
+  ::selection {
+    background: theme('colors.accent.soft');
+    color: theme('colors.ink.900');
+  }
+
+  /* Visible, consistent keyboard focus everywhere */
+  :focus-visible {
+    outline: 2px solid theme('colors.accent.DEFAULT');
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: none;
+  }
+}
+
+/* ================================================================== */
+/* Motion tokens                                                       */
+/*                                                                     */
+/* One place decides how fast anything moves. Motion is short and      */
+/* purposeful: nothing floats, bounces, spins for decoration or runs   */
+/* forever. Every animation below is opt-out via prefers-reduced-motion */
+/* at the bottom of this file.                                         */
+/* ================================================================== */
+:root {
+  --dur-1: 90ms;    /* press feedback */
+  --dur-2: 140ms;   /* hover, colour swaps */
+  --dur-3: 220ms;   /* panels, dropdowns, reveals */
+  --dur-4: 380ms;   /* page entrance, data draw */
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --reveal-distance: 10px;
+}
+
+/* ---------- Scrollbars (quiet, light) ---------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #D8D1C6 transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: #D8D1C6;
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: #C0B9AF;
+}
+
+/* ---------- Keyframes ---------- */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes popIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes spinLoop {
+  to { transform: rotate(360deg); }
+}
+@keyframes drawBar {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* Used by the sync status dot: a slow pulse that only runs while a real
+   synchronization is in flight, never as ambient decoration. */
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+.animate-fade-in  { animation: fadeIn var(--dur-3) var(--ease-out) both; }
+.animate-pop-in   { animation: popIn var(--dur-3) var(--ease-standard) both; }
+.animate-slide-up { animation: slideUp var(--dur-3) var(--ease-out) both; }
+
+/* ---------- Page entrance ---------- */
+/* Applied to the routed page wrapper. Small distance: the content is
+   readable from the first frame, it just settles. */
+.page-enter {
+  animation: pageEnter var(--dur-4) var(--ease-out) both;
+}
+
+/* ---------- Scroll reveal ---------- */
+/* Hidden is the pre-observation state. `Reveal` only sets it once it has
+   confirmed IntersectionObserver exists and reduced motion is off, so
+   content is never trapped invisible. */
+.reveal {
+  opacity: 0;
+  transform: translateY(var(--reveal-distance));
+  will-change: opacity, transform;
+}
+.reveal.is-in {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--dur-4) var(--ease-out),
+    transform var(--dur-4) var(--ease-out);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: auto;
+}
+
+/* ---------- Working indicator ---------- */
+.icon-spin { animation: spinLoop 800ms linear infinite; }
+
+/* A live sync dot. Only rendered while a run is actually in flight. */
+.status-live { animation: statusPulse 1.6s var(--ease-standard) infinite; }
+
+/* ---------- Chart data draw ---------- */
+.chart-draw { animation: drawBar var(--dur-4) var(--ease-out) both; }
+
+/* ---------- Progress bars & rings ---------- */
+.meter-fill {
+  transition: width var(--dur-4) var(--ease-out);
+}
+
+/* ---------- Interaction ---------- */
+/* Press feedback for controls. Kept to a 1px optical shift so it reads as
+   a physical response rather than an animation. */
+.pressable {
+  transition:
+    background-color var(--dur-2) var(--ease-standard),
+    border-color var(--dur-2) var(--ease-standard),
+    color var(--dur-2) var(--ease-standard),
+    box-shadow var(--dur-2) var(--ease-standard),
+    transform var(--dur-1) var(--ease-standard);
+}
+.pressable:active:not(:disabled) { transform: translateY(1px); }
+
+/* Cards get at most a hairline lift on hover, and only when they are
+   genuinely interactive (a button or link inside). */
+.lift {
+  transition:
+    border-color var(--dur-2) var(--ease-standard),
+    box-shadow var(--dur-2) var(--ease-standard),
+    transform var(--dur-2) var(--ease-out);
+}
+@media (hover: hover) {
+  .lift:hover {
+    transform: translateY(-1px);
+    box-shadow: theme('boxShadow.lift');
+    border-color: theme('colors.line.strong');
+  }
+}
+
+/* ---------- Navigation active marker ---------- */
+.nav-item {
+  position: relative;
+  transition:
+    background-color var(--dur-2) var(--ease-standard),
+    color var(--dur-2) var(--ease-standard);
+}
+.nav-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2px;
+  height: 0;
+  border-radius: 9999px;
+  background: theme('colors.accent.DEFAULT');
+  transform: translateY(-50%);
+  transition: height var(--dur-3) var(--ease-out);
+}
+.nav-item[aria-current='page']::before { height: 18px; }
+
+/* ================================================================== */
+/* Reduced motion                                                      */
+/* Non-essential movement is removed outright: reveals resolve to their */
+/* final state, spinners and pulses stop, nothing translates.           */
+/* ================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .reveal,
+  .reveal.is-in {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+
+  .icon-spin,
+  .status-live,
+  .chart-draw,
+  .page-enter {
+    animation: none !important;
+  }
+
+  .page-enter { opacity: 1 !important; transform: none !important; }
+
+  .pressable:active:not(:disabled),
+  .lift:hover {
+    transform: none !important;
+  }
+}
+
+/* ---------- Timetable printing ---------- */
+@media print {
+  body { background: #fff; }
+  .no-print { display: none !important; }
+}
