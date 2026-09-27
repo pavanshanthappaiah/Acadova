@@ -303,7 +303,7 @@ export const ProductivityRadar = () => {
               <EmptyState
                 icon={Award}
                 title="No consistency data yet"
-                description="Streaks build from your logged problems, completed study blocks, and project hours."
+                description="Streaks build from your logged problems, attended classes, and completed activity blocks."
               />
             </Card>
           ) : (
@@ -321,7 +321,14 @@ export const ProductivityRadar = () => {
                       </span>
                       <span className="text-sm text-ink-500">{st.streak === 1 ? 'day' : 'days'}</span>
                     </p>
-                    <p className="text-2xs leading-relaxed text-ink-400">{st.criterion}</p>
+                    {/* A zero must say why, not just sit there as a bare 0. */}
+                    <p className="text-2xs leading-relaxed text-ink-400">
+                      {st.streak > 0
+                        ? st.criterion
+                        : st.activeToday
+                          ? `${st.criterion} — today counts from tomorrow.`
+                          : `No consecutive run yet. ${st.criterion}.`}
+                    </p>
                   </Card>
                 ))}
               </div>

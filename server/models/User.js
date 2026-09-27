@@ -20,6 +20,14 @@ const userSchema = new mongoose.Schema(
       required: [true, 'Password is required'],
       minlength: [6, 'Password must be at least 6 characters'],
     },
+    /* OpenID Connect identity (present only for SSO accounts). `provider`
+       is the OIDC issuer, `providerId` the provider's immutable `sub`.
+       An SSO-only account has a random unusable password hash. */
+    oidc: {
+      issuer: { type: String, default: '' },
+      providerId: { type: String, default: '' },
+      picture: { type: String, default: '' },
+    },
     branch: {
       type: String,
       default: 'Computer Science & Engineering',
@@ -58,6 +66,7 @@ userSchema.pre('save', async function (next) {
 });
 
 userSchema.methods.matchPassword = async function (enteredPassword) {
+  if (!this.password) return false; // SSO-only account has no usable password
   return await bcrypt.compare(enteredPassword, this.password);
 };
 

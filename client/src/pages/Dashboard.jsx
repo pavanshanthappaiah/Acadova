@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ClipboardCheck,
-  CalendarDays, ListChecks, CheckCircle2, Circle, AlertTriangle, ArrowRight, Clock,
+  CalendarDays, ListChecks, CheckCircle2, Circle, AlertTriangle, ArrowRight, Clock, Target,
 } from '../components/common/Icons';
 import API from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -23,23 +23,26 @@ export const Dashboard = () => {
   const [routinesToday, setRoutinesToday] = useState(null); // { totalCount, completedCount, percentage }
   const [routineTotal, setRoutineTotal] = useState(null); // every routine the student owns
   const [radar, setRadar] = useState(null);
+  const [streaks, setStreaks] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [att, acad, today_routines, all_routines, rad] = await Promise.allSettled([
+      const [att, acad, today_routines, all_routines, rad, cons] = await Promise.allSettled([
         API.get('/productivity/attention'),
         API.get('/academics/overview'),
         API.get(`/routines?date=${today}`),
         API.get('/routines?scope=all'),
         API.get('/productivity/radar'),
+        API.get('/productivity/consistency'),
       ]);
 
       setAttention(att.status === 'fulfilled' ? att.value.data : null);
       setAcademic(acad.status === 'fulfilled' ? acad.value.data : null);
       setRadar(rad.status === 'fulfilled' ? rad.value.data : null);
+      setStreaks(cons.status === 'fulfilled' ? cons.value.data : null);
 
       const routinesOk = today_routines.status === 'fulfilled';
       const allRoutinesOk = all_routines.status === 'fulfilled';
@@ -47,7 +50,7 @@ export const Dashboard = () => {
       setRoutineTotal(allRoutinesOk ? all_routines.value.data?.totalRoutines ?? 0 : null);
 
       // Only a total failure is an error; individual sections degrade on their own.
-      const anyOk = [att, acad, today_routines, all_routines, rad].some((r) => r.status === 'fulfilled');
+      const anyOk = [att, acad, today_routines, all_routines, rad, cons].some((r) => r.status === 'fulfilled');
       setError(anyOk ? '' : 'Could not reach the server. Your data is safe. Retry when you are back online.');
     } finally {
       setLoading(false);
@@ -273,6 +276,36 @@ export const Dashboard = () => {
               </li>
             ))}
           </ul>
+        </Card>
+      )}
+
+      {/* ---------------- Streaks strip (only when a run exists) ---------------- */}
+      {!loading && streaks?.success && streaks.streaks?.some((s) => s.streak > 0) && (
+        <Card className="p-5 sm:p-6">
+          <div className="flex items-center justify-between gap-2 mb-4">
+            <div className="flex items-center gap-2">
+              <Target className="w-4 h-4 text-accent" />
+              <h2 className="font-display text-lg font-semibold tracking-tightest text-ink-900">Streaks</h2>
+            </div>
+            <Link
+              to="/productivity"
+              className="text-xs font-medium text-accent-strong inline-flex items-center gap-1"
+            >
+              Reviews <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {streaks.streaks.map((s) => (
+              <div key={s.name}>
+                <p className="text-2xs font-medium uppercase tracking-wide2 text-ink-400">{s.name}</p>
+                <p className="mt-1 flex items-baseline gap-1.5">
+                  <span className="font-display text-2xl font-semibold leading-none text-ink-900">{s.streak}</span>
+                  <span className="text-2xs text-ink-500">{s.streak === 1 ? 'day' : 'days'}</span>
+                  {s.activeToday && <Pill tone="ok">Today</Pill>}
+                </p>
+              </div>
+            ))}
+          </div>
         </Card>
       )}
 

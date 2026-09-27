@@ -53,6 +53,17 @@ export const AuthProvider = ({ children }) => {
     throw new Error(res.data?.message || 'Login failed');
   };
 
+  /* Single sign-on returns the same token + user payload through the OIDC
+     exchange, so the session state is identical to a password login. */
+  const loginWithToken = async (newToken, userData) => {
+    if (!newToken || !userData) throw new Error('Sign-in response was incomplete.');
+    localStorage.setItem('studentos_token', newToken);
+    localStorage.setItem('studentos_user', JSON.stringify(userData));
+    setToken(newToken);
+    setUser(userData);
+    return userData;
+  };
+
   const register = async (userData) => {
     const res = await API.post('/auth/register', userData);
     if (res.data && res.data.success) {
@@ -89,6 +100,7 @@ export const AuthProvider = ({ children }) => {
         loading,
         isAuthenticated: !!token && !!user,
         login,
+        loginWithToken,
         register,
         logout,
         updateUser,

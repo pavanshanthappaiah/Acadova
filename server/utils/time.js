@@ -63,6 +63,14 @@ export const evaluateLock = ({ date, threshold, today, nowMinutes }) => {
   return { locked: nowMinutes < threshold, lockAt };
 };
 
+/**
+ * A routine is "flexible" when it has no start time — the student wants to do
+ * it whenever, not at a fixed slot. Its checkbox is gated differently from a
+ * timed one: it only opens once every timed routine for that day has been
+ * marked (in practice, end of day).
+ */
+export const isFlexibleRoutine = (routine) => toMinutes(routine?.startTime) == null;
+
 export const lockMessage = (lockAt, noun = 'Completion') =>
   `${noun} is available after ${to12h(lockAt)}.`;
 

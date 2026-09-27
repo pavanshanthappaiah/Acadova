@@ -342,6 +342,13 @@ const StatusChip = ({ item }) => {
     return <Pill>Not marked</Pill>;
   }
   if (item.completed) return <Pill tone="ok">Completed</Pill>;
+  if (item.locked && item.flexible) {
+    return (
+      <Pill>
+        <Lock className="w-3 h-3" /> After timed routines
+      </Pill>
+    );
+  }
   if (item.locked) {
     return (
       <Pill>
@@ -358,6 +365,7 @@ const StatusChip = ({ item }) => {
  */
 const RoutineStatusCell = ({ routine }) => {
   if (routine.completed) return <Pill tone="ok">Completed</Pill>;
+  if (routine.locked && routine.flexible) return <Pill>After timed routines</Pill>;
   if (routine.locked) return <Pill>Not yet available</Pill>;
   return <Pill>Not completed</Pill>;
 };
@@ -386,7 +394,9 @@ const RowControl = ({ item, onToggle }) => {
       onChange={onToggle}
       ariaLabel={
         item.locked
-          ? `Available after ${to12h(item.lockAt)}, ${item.title}`
+          ? item.flexible
+            ? `Opens after all timed routines are marked, ${item.title}`
+            : `Available after ${to12h(item.lockAt)}, ${item.title}`
           : `Mark “${item.title}” ${item.completed ? 'not done' : 'done'}`
       }
     />
@@ -610,10 +620,14 @@ export const MyRoutine = () => {
     const unlockable = [...timeline, ...routines].some(
       (item) =>
         item.locked &&
-        item.lockAt &&
-        (item.date || date) === today &&
-        toMin(item.lockAt) != null &&
-        nowMin >= toMin(item.lockAt)
+        // Flexible routines have no clock time to wait for — their gate opens
+        // when another action (marking the last timed routine) lands, so the
+        // periodic re-read is what notices it.
+        ((item.flexible && (item.date || date) === today) ||
+          (item.lockAt &&
+            (item.date || date) === today &&
+            toMin(item.lockAt) != null &&
+            nowMin >= toMin(item.lockAt)))
     );
     if (unlockable && !refreshForUnlock.current) {
       refreshForUnlock.current = true;
@@ -934,7 +948,12 @@ export const MyRoutine = () => {
                   // its own column too, so the status column never repeats it.
                   const startLabel = r.startTime ? to12h(r.startTime) : '-';
                   const endLabel = r.endTime ? to12h(r.endTime) : '-';
-                  const afterLabel = r.startTime ? `After ${to12h(r.endTime || r.startTime)}` : '-';
+                  const afterLabel =
+                    r.startTime
+                      ? `After ${to12h(r.endTime || r.startTime)}`
+                      : r.locked && r.flexible
+                        ? 'After timed routines'
+                        : '-';
                   const actions = (
                     <>
                       <button
@@ -974,7 +993,9 @@ export const MyRoutine = () => {
                           onChange={() => toggle(r)}
                           ariaLabel={
                             r.locked
-                              ? `Available after ${to12h(r.lockAt)}, ${r.title}`
+                              ? r.flexible
+                                ? `Opens after all timed routines are marked, ${r.title}`
+                                : `Available after ${to12h(r.lockAt)}, ${r.title}`
                               : `Mark “${r.title}” ${r.completed ? 'not done' : 'done'}`
                           }
                         />
@@ -1022,7 +1043,11 @@ export const MyRoutine = () => {
                           <DetailItem label="Repeats" value={r.isRecurring ? formatRecurrence(r.recurrenceDays) : 'Once'} />
                           <DetailItem
                             label="Completable"
-                            value={r.startTime ? `After ${to12h(r.endTime || r.startTime)}` : 'Anytime'}
+                            value={r.startTime
+                              ? `After ${to12h(r.endTime || r.startTime)}`
+                              : r.flexible
+                                ? 'Once timed routines are done'
+                                : 'Anytime'}
                           />
                           {r.notes && (
                             <div className="col-span-2 sm:col-span-4">
@@ -1350,7 +1375,8 @@ const DayPanel = ({ stat, day }) => {
       {stat.locked > 0 && (
         <p className="text-2xs text-ink-400 mt-2">
           Items still inside their scheduled session are not counted as pending. They unlock when
-          the session ends.
+          the session ends. Untimed (flexible) routines unlock once every timed routine of the day
+          is marked.
         </p>
       )}
       {day?.isFuture && (

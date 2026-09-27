@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AlertCircle } from '../components/common/Icons';
 import { useAuth } from '../context/AuthContext';
 import AuthShell from '../components/common/AuthShell';
 import { Button, Input, Field } from '../components/common/ui';
+import API from '../services/api';
 
 export const Login = () => {
   const navigate = useNavigate();
@@ -14,6 +15,7 @@ export const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sso, setSso] = useState({ configured: false, checked: false });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -28,6 +30,28 @@ export const Login = () => {
       setLoading(false);
     }
   };
+
+  /* Single sign-on is offered only when the server reports it configured;
+     failures carried back from the provider appear as a normal error. */
+  useEffect(() => {
+    let cancelled = false;
+    API.get('/auth/oidc/providers')
+      .then((res) => {
+        if (!cancelled) setSso({ configured: !!res.data?.configured, checked: true });
+      })
+      .catch(() => {
+        if (!cancelled) setSso({ configured: false, checked: true });
+      });
+    const params = new URLSearchParams(window.location.search);
+    const ssoError = params.get('sso_error');
+    if (ssoError) {
+      setError(ssoError);
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <AuthShell
@@ -89,6 +113,24 @@ export const Login = () => {
           {loading ? 'Signing in…' : 'Sign in'}
         </Button>
       </form>
+
+      {sso.configured && (
+        <>
+          <div className="my-5 flex items-center gap-3" role="separator" aria-label="or">
+            <span className="h-px flex-1 bg-line" />
+            <span className="text-2xs uppercase tracking-wide2 text-ink-400">or</span>
+            <span className="h-px flex-1 bg-line" />
+          </div>
+          <a href="/api/auth/oidc/start" className="block">
+            <Button variant="secondary" className="w-full !h-10" type="button">
+              Continue with single sign-on
+            </Button>
+          </a>
+          <p className="mt-2 text-center text-2xs text-ink-400">
+            Uses your institution or company account.
+          </p>
+        </>
+      )}
     </AuthShell>
   );
 };

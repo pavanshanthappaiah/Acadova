@@ -217,7 +217,7 @@ All operational endpoints require `Authorization: Bearer <token>` and are scoped
 
 | Base | Responsibility |
 | --- | --- |
-| `/api/auth` | Register, login, `me`, profile settings |
+| `/api/auth` | Register, login, `me`, profile settings, and OIDC single sign-on (`/oidc/providers`, `/oidc/start`, `/oidc/callback`, `/oidc/exchange`) |
 | `/api/activities` | Day timeline CRUD, status updates, live timer, planned-versus-actual metrics |
 | `/api/academics` | Semesters, subjects, timetable grid and cells, exceptions, `today`, attendance, assessments, assignments, exams |
 | `/api/routines` | Custom routines CRUD, category CRUD, per-date completion toggle, combined timeline, day / week / month analytics |
@@ -305,7 +305,26 @@ SMTP_PORT=
 SMTP_USER=
 SMTP_PASS=
 SMTP_FROM=
+
+# Single sign-on (OpenID Connect). SSO appears on the sign-in page only
+# when OIDC_ISSUER and OIDC_CLIENT_ID are set. Works with any compliant
+# provider: Google (https://accounts.google.com), Microsoft Entra ID
+# (https://login.microsoftonline.com/<tenant>/v2.0), Keycloak, Auth0...
+OIDC_ISSUER=
+OIDC_CLIENT_ID=
+OIDC_CLIENT_SECRET=
+# Optional overrides; defaults are derived from CLIENT_URL / SERVER_URL
+# OIDC_REDIRECT_URI=https://your-host/api/auth/oidc/callback
+# OIDC_SCOPES=openid profile email
 ```
+
+How SSO works: `/api/auth/oidc/providers` reports availability, `start`
+redirects to the provider with PKCE + state + nonce (a signed HttpOnly
+cookie binds the flow), and `callback` verifies the `id_token` against the
+provider's JWKS before matching an account. Existing accounts with the same
+email are linked; new emails get an SSO-only account whose random password
+can never be used. The SPA receives a one-time token via URL fragment and
+redeems it at `POST /api/auth/oidc/exchange` for the standard JWT.
 
 Create `client/.env`:
 

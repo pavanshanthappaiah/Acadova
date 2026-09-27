@@ -7,6 +7,7 @@ import {
   toMinutes,
   evaluateLock,
   lockMessage,
+  isFlexibleRoutine,
   dayNameOf,
   datesInWeek,
   datesInMonth,
@@ -20,6 +21,53 @@ import {
 const getDayName = dayNameOf;
 
 const effectiveEnd = (endTime, startTime) => toMinutes(endTime) ?? toMinutes(startTime);
+
+/**
+ * Ids of the student's timed routines that apply to `date` — the set the
+ * flexible gate waits on before untimed routines become markable.
+ */
+const timedRoutineIdsForDate = async (userId, date) =>
+  CustomRoutine.find({
+    user: userId,
+    startTime: { $ne: '' },
+    $or: [
+      { isRecurring: false, date },
+      {
+        isRecurring: true,
+        $or: [
+          { recurrenceDays: dayNameOf(date) },
+          { recurrenceDays: 'Every Day' },
+          { recurrenceDays: 'daily' },
+        ],
+      },
+    ],
+  }).distinct('_id');
+
+/**
+ * Flexible (untimed) routines become markable only once every timed routine
+ * for the same date has been marked — "end of day", without hard-coding an
+ * hour. Days with no timed routines leave the gate open. Past days stay open
+ * for corrections; future days are already covered by evaluateLock.
+ *
+ * Returns null when the gate is open, or a human-readable reason when closed.
+ */
+const flexibleGate = async (userId, date, today) => {
+  if (date !== today) return null;
+
+  const ids = await timedRoutineIdsForDate(userId, date);
+  if (ids.length === 0) return null; // nothing timed today → flexible stays open
+
+  const doneTimed = await RoutineCompletion.countDocuments({
+    user: userId,
+    routine: { $in: ids },
+    date,
+    completed: true,
+  });
+
+  return doneTimed < ids.length
+    ? `Flexible routines unlock once all timed routines for today are marked (${doneTimed} of ${ids.length} done).`
+    : null;
+};
 
 /**
  * One read of everything a schedule day needs, reusable across a single date, a
@@ -64,7 +112,7 @@ const slotEndTime = (slot, semester) => {
  * minus exceptions) plus the student's own routines, each carrying its live
  * lock state and completion status.
  */
-const buildDayItems = (ctx, date, { today, nowMinutes }) => {
+const buildDayItems = (ctx, date, { today, nowMinutes, flexibleGateMessage = null }) => {
   const dayOfWeek = getDayName(date);
   const { activeSemester: semester } = ctx;
   const items = [];
@@ -153,6 +201,12 @@ const buildDayItems = (ctx, date, { today, nowMinutes }) => {
       today,
       nowMinutes,
     });
+    // The flexible gate is decided per whole day, so it is computed by the
+    // caller (timedRoutineIdsForDate + flexibleGate) and passed in. Non-today
+    // days are exempt: past days stay open for corrections and future days
+    // are already fully locked by evaluateLock.
+    const flexible = isFlexibleRoutine(routine);
+    const flexibleLocked = flexible && !done && date === today && !!flexibleGateMessage;
 
     items.push({
       _id: routine._id,
@@ -167,11 +221,19 @@ const buildDayItems = (ctx, date, { today, nowMinutes }) => {
       startTime: routine.startTime,
       endTime: routine.endTime,
       date,
-      lockAt: lock.lockAt,
-      locked: done ? false : lock.locked,
+      flexible,
+      lockAt: flexibleLocked ? null : lock.lockAt,
+      locked: done ? false : flexibleLocked || lock.locked,
+      lockMessage: done
+        ? null
+        : flexibleLocked
+          ? flexibleGateMessage
+          : lock.locked
+            ? lockMessage(lock.lockAt)
+            : null,
       completed: done,
       completedAt: completion?.completedAt || null,
-      status: done ? 'completed' : lock.locked ? 'scheduled' : 'available',
+      status: done ? 'completed' : flexibleLocked || lock.locked ? 'scheduled' : 'available',
     });
   }
 
@@ -257,7 +319,10 @@ export const getRoutinesForDate = async (req, res) => {
     });
 
     // Each routine carries its live lock state so the checkbox can be disabled
-    // before the scheduled session has finished.
+    // before the scheduled session has finished. Flexible (untimed) routines
+    // additionally wait for every timed routine of the day to be marked.
+    const flexibleMessage = await flexibleGate(req.user.id, todayStr, today);
+
     const routinesWithStatus = allRoutines.map((r) => {
       const completion = completionMap.get(r._id.toString());
       const done = !!completion?.completed;
@@ -267,14 +332,23 @@ export const getRoutinesForDate = async (req, res) => {
         today,
         nowMinutes,
       });
+      const flexible = isFlexibleRoutine(r);
+      const flexibleLocked = flexible && !done && !!flexibleMessage;
       return {
         ...r.toObject(),
         completed: done,
         completedAt: completion?.completedAt || null,
+        flexible,
         lockAt: lock.lockAt,
-        locked: done ? false : lock.locked,
-        lockMessage: lock.locked && !done ? lockMessage(lock.lockAt) : null,
-        status: done ? 'completed' : lock.locked ? 'scheduled' : 'available',
+        locked: done ? false : flexibleLocked || lock.locked,
+        lockMessage: done
+          ? null
+          : flexibleLocked
+            ? flexibleMessage
+            : lock.locked
+              ? lockMessage(lock.lockAt)
+              : null,
+        status: done ? 'completed' : flexibleLocked || lock.locked ? 'scheduled' : 'available',
       };
     });
 
@@ -447,6 +521,21 @@ export const toggleRoutineCompletion = async (req, res) => {
       }
     }
 
+    // Flexible (untimed) routines unlock only after every timed routine for
+    // this date has been marked. Enforced here, not only in the UI, so a
+    // direct API call cannot bypass the rule.
+    if (completed !== false && isFlexibleRoutine(routine)) {
+      const gateMessage = await flexibleGate(req.user.id, targetDate, today);
+      if (gateMessage) {
+        return res.status(400).json({
+          success: false,
+          code: 'FLEXIBLE_LOCKED',
+          flexible: true,
+          message: gateMessage,
+        });
+      }
+    }
+
     const completion = await RoutineCompletion.findOneAndUpdate(
       {
         user: req.user.id,
@@ -483,7 +572,10 @@ export const getCombinedDailyTimeline = async (req, res) => {
     const nowMinutes = localMinutesOfDay();
 
     const ctx = await loadScheduleContext(req.user.id, [targetDate]);
-    const day = buildDayItems(ctx, targetDate, { today, nowMinutes });
+    // One gate decision per request — buildDayItems stamps every flexible
+    // routine in the day with the same reason when it is closed.
+    const flexibleGateMessage = await flexibleGate(req.user.id, targetDate, today);
+    const day = buildDayItems(ctx, targetDate, { today, nowMinutes, flexibleGateMessage });
 
     const academicCount = day.items.filter((i) => i.source === 'academic').length;
     const routineCount = day.items.filter((i) => i.source === 'routine').length;
@@ -521,9 +613,13 @@ export const getRoutineAnalytics = async (req, res) => {
 
     const ctx = await loadScheduleContext(req.user.id, allDates);
     const dayContext = { today, nowMinutes };
+    const anchorGateMessage = await flexibleGate(req.user.id, anchor, today);
 
     const summaryFor = (date) => {
-      const built = buildDayItems(ctx, date, dayContext);
+      const built = buildDayItems(ctx, date, {
+        ...dayContext,
+        flexibleGateMessage: date === anchor ? anchorGateMessage : null,
+      });
       return {
         date,
         dayOfWeek: built.dayOfWeek,
@@ -566,7 +662,7 @@ export const getRoutineAnalytics = async (req, res) => {
       };
     };
 
-    const dayBuilt = buildDayItems(ctx, anchor, dayContext);
+    const dayBuilt = buildDayItems(ctx, anchor, { ...dayContext, flexibleGateMessage: anchorGateMessage });
 
     return res.status(200).json({
       success: true,

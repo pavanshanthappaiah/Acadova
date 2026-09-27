@@ -1,11 +1,48 @@
 import { DailyReview, WeeklyReview } from '../models/Productivity.js';
 import { Activity } from '../models/Activity.js';
-import { Assignment, Exam, Subject } from '../models/Academic.js';
+import { Assignment, Exam, Subject, ClassSession } from '../models/Academic.js';
 import { CodingProblem, Project } from '../models/TechnicalGrowth.js';
+import { LeetCodeSolvedProblem } from '../models/LeetCode.js';
 import { computeSubjectAttendance } from './academicController.js';
 
-// Helper to format date YYYY-MM-DD
-const formatDate = (date) => date.toISOString().split('T')[0];
+// Helper to format a date as YYYY-MM-DD in the student's LOCAL calendar.
+// toISOString() would hand back the UTC day, which is the wrong day for part
+// of the world (in India, from midnight to 05:30 local it would read yesterday).
+const formatDate = (date) => {
+  const d = date || new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+/**
+ * Consecutive-day run ending today (or yesterday, when today is not logged
+ * yet — a streak stays alive until the day actually ends, the same way
+ * GitHub and LeetCode display it).
+ */
+const currentStreakOf = (daySet, todayStr) => {
+  const DAY_MS = 86400000;
+  const toTime = (s) => {
+    const [y, m, d] = s.split('-').map(Number);
+    return Date.UTC(y, m - 1, d);
+  };
+  const fromTime = (t) => new Date(t).toISOString().slice(0, 10);
+  let cursor = daySet.has(todayStr) ? toTime(todayStr) : toTime(todayStr) - DAY_MS;
+  let streak = 0;
+  while (daySet.has(fromTime(cursor))) {
+    streak += 1;
+    cursor -= DAY_MS;
+  }
+  return streak;
+};
+
+/**
+ * A UTC-instant window covering the student's LOCAL calendar day
+ * `YYYY-MM-DD`, for querying stored UTC timestamps (e.g. solvedAt).
+ */
+const dayWindow = (localDayStr) => {
+  const [y, m, d] = localDayStr.split('-').map(Number);
+  return { $gte: new Date(y, m - 1, d), $lt: new Date(y, m - 1, d + 1) };
+};
 
 // @desc    Get 7-Day Deadline Radar
 // @route   GET /api/productivity/radar
@@ -186,26 +223,48 @@ export const getConsistencyStreaks = async (req, res) => {
   try {
     const todayStr = formatDate(new Date());
 
-    // Coding Streak
-    const problems = await CodingProblem.find({ user: req.user.id }).select('date');
-    const problemDates = Array.from(new Set(problems.map((p) => p.date))).sort().reverse();
-    const codingStreak = problemDates.includes(todayStr) || problemDates.length > 0 ? problemDates.length : 0;
+    // --- DSA coding streak ---
+    // Two sources feed one streak: LeetCode syncs (solvedAt is a UTC Date)
+    // and manual practice logs (date is a YYYY-MM-DD string). Both are
+    // reduced to local calendar days, then walked back consecutively.
+    const [lcRows, manualRows] = await Promise.all([
+      LeetCodeSolvedProblem.find({ user: req.user.id }).select('solvedAt').lean(),
+      CodingProblem.find({ user: req.user.id }).select('date').lean(),
+    ]);
+    const codingDays = new Set();
+    lcRows.forEach((r) => r.solvedAt && codingDays.add(formatDate(new Date(r.solvedAt))));
+    manualRows.forEach((r) => r.date && codingDays.add(r.date));
+    const codingStreak = currentStreakOf(codingDays, todayStr);
 
-    // Study Streak (days with completed academic activities >= 60 mins)
-    const academicActs = await Activity.find({
-      user: req.user.id,
-      category: 'academic',
-      status: 'completed',
-    });
-    const studyDates = Array.from(new Set(academicActs.map((a) => a.date)));
+    // --- Study streak ---
+    // A day counts when a class was attended (ClassSession — where attendance
+    // actually lives) OR a completed academic activity was logged.
+    const [sessions, academicActs] = await Promise.all([
+      ClassSession.find({ user: req.user.id, status: { $in: ['attended', 'present'] } })
+        .select('date')
+        .lean(),
+      Activity.find({ user: req.user.id, category: 'academic', status: 'completed' })
+        .select('date')
+        .lean(),
+    ]);
+    const studyDays = new Set();
+    sessions.forEach((s) => s.date && studyDays.add(s.date));
+    academicActs.forEach((a) => a.date && studyDays.add(a.date));
+    const studyStreak = currentStreakOf(studyDays, todayStr);
 
-    // Project Streak
+    // --- Project streak ---
+    // Days with completed project-category activity blocks. Hours logged on
+    // a project's page add to its total but carry no date, so they cannot
+    // contribute to a per-day streak.
     const projectActs = await Activity.find({
       user: req.user.id,
       category: 'project',
       status: 'completed',
-    });
-    const projectDates = Array.from(new Set(projectActs.map((a) => a.date)));
+    })
+      .select('date')
+      .lean();
+    const projectDays = new Set(projectActs.map((a) => a.date).filter(Boolean));
+    const projectStreak = currentStreakOf(projectDays, todayStr);
 
     return res.status(200).json({
       success: true,
@@ -214,22 +273,22 @@ export const getConsistencyStreaks = async (req, res) => {
           name: 'DSA Coding Streak',
           category: 'Coding',
           streak: codingStreak,
-          criterion: 'At least 1 LeetCode/DSA problem solved',
-          activeToday: problemDates.includes(todayStr),
+          criterion: 'At least 1 problem solved each day (LeetCode sync or manual log)',
+          activeToday: codingDays.has(todayStr),
         },
         {
           name: 'Academic Deep Work',
           category: 'Academic',
-          streak: studyDates.length,
-          criterion: '≥60 mins of classes or revision completed',
-          activeToday: studyDates.includes(todayStr),
+          streak: studyStreak,
+          criterion: 'A class attended or a study block completed each day',
+          activeToday: studyDays.has(todayStr),
         },
         {
           name: 'Engineering Project Sprint',
           category: 'Projects',
-          streak: projectDates.length,
-          criterion: 'Committed code or logged project milestone',
-          activeToday: projectDates.includes(todayStr),
+          streak: projectStreak,
+          criterion: 'A project activity block completed each day',
+          activeToday: projectDays.has(todayStr),
         },
       ],
     });
@@ -283,9 +342,16 @@ export const getAttentionRequired = async (req, res) => {
       }
     });
 
-    // 3. Coding streak at risk if not done today
-    const solvedToday = await CodingProblem.findOne({ user: req.user.id, date: todayStr });
-    if (!solvedToday) {
+    // 3. Coding streak at risk if not done today. The same two sources the
+    // streak itself reads — a synced LeetCode solve counts exactly like a
+    // manual log, so an active streak is never reported as at risk.
+    const [solvedToday, syncedToday] = await Promise.all([
+      CodingProblem.findOne({ user: req.user.id, date: todayStr }).select('_id').lean(),
+      LeetCodeSolvedProblem.findOne({ user: req.user.id, solvedAt: dayWindow(todayStr) })
+        .select('_id')
+        .lean(),
+    ]);
+    if (!solvedToday && !syncedToday) {
       attentionItems.push({
         id: 'coding-streak',
         title: 'Daily DSA Problem Practice',

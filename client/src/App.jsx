@@ -6,6 +6,7 @@ import AppLayout from './components/layout/AppLayout';
 import IntroSplash from './components/common/IntroSplash';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import OidcCallback from './pages/OidcCallback';
 import Dashboard from './pages/Dashboard';
 import Academics from './pages/Academics';
 import ProjectsPage from './pages/ProjectsPage';
@@ -25,6 +26,7 @@ export const App = () => {
           {/* Public authentication routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/oidc/callback" element={<OidcCallback />} />
           <Route path="/legal/:doc" element={<Legal />} />
 
           {/* Protected application routes */}
