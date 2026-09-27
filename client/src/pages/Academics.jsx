@@ -133,7 +133,7 @@ export const Academics = () => {
           className="flex-shrink-0 overflow-y-auto px-4 sm:px-6 lg:px-8 py-8 pb-16"
           style={{ height: 'calc(100vh - 4rem)', scrollSnapAlign: 'start' }}
         >
-          <AttendanceSection overview={overview} />
+          <AttendanceSection overview={overview} onChanged={refreshAll} />
         </div>
       </div>
     </div>

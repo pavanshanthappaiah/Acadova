@@ -118,6 +118,21 @@ export const markNotificationsRead = async (req, res) => {
   }
 };
 
+/** DELETE /api/notifications — clear the in-app history (all, or one by id).
+ *  History only: preferences and scheduled reminders are untouched, so the
+ *  dispatcher keeps working exactly as before. */
+export const clearNotifications = async (req, res) => {
+  try {
+    const filter = { user: req.user._id };
+    if (req.body?.id) filter._id = req.body.id;
+    const result = await AppNotification.deleteMany(filter);
+    const unread = await AppNotification.countDocuments({ user: req.user._id, read: false });
+    res.json({ success: true, deleted: result.deletedCount || 0, unread });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 /** GET /api/notifications/reminders — upcoming scheduled reminders (planner visibility) */
 export const listScheduledReminders = async (req, res) => {
   try {
@@ -216,6 +231,7 @@ router.get('/preferences', getPreferences);
 router.put('/preferences', updatePreferences);
 router.get('/', listNotifications);
 router.post('/read', markNotificationsRead);
+router.delete('/', clearNotifications);
 router.get('/reminders', listScheduledReminders);
 router.post('/sync', manualSync);
 router.post('/push/subscribe', subscribePush);

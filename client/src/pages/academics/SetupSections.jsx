@@ -301,6 +301,7 @@ const emptySubject = () => ({
   theorySessionsPerWeek: 3,
   theoryDuration: 1,
   hasLab: false,
+  targetAttendance: '',
   labSection: { hasLab: false, labName: '', duration: 2, sessionsPerWeek: 1 },
 });
 
@@ -330,6 +331,7 @@ export const SubjectsSection = ({ subjects: rawSubjects, onChanged, semesterRead
       theorySessionsPerWeek: s.theorySessionsPerWeek || 3,
       theoryDuration: s.theoryDuration || 1,
       hasLab: !!s.labSection?.hasLab,
+      targetAttendance: s.targetAttendance || '',
       labSection: {
         hasLab: !!s.labSection?.hasLab,
         labName: s.labSection?.labName || '',
@@ -553,6 +555,20 @@ export const SubjectsSection = ({ subjects: rawSubjects, onChanged, semesterRead
               />
             </Field>
           </div>
+
+          <Field
+            label="Attendance target for this subject (optional)"
+            hint="Leave blank to use your default from Settings. Must-attend and safe-bunk maths use this number."
+          >
+            <Input
+              type="number"
+              min="50"
+              max="100"
+              value={form.targetAttendance}
+              onChange={(e) => setForm({ ...form, targetAttendance: e.target.value })}
+              placeholder="Default from Settings"
+            />
+          </Field>
 
           {/* 4-credit lab flow */}
           {Number(form.credits) === 4 && (

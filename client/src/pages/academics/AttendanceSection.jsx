@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Check, X, Ban, Lock, CalendarOff, History, CalendarDays, Pencil, ChevronDown } from '../../components/common/Icons';
 import API from '../../services/api';
 import {
@@ -147,7 +147,63 @@ const AttendanceActions = ({ cls, isFuture, onMark, editing, setEditing }) => {
 
 const today = localToday();
 
-export const AttendanceSection = ({ overview }) => {
+/* Per-subject attendance target, editable inline on the summary card.
+   The safe-bunk / must-attend maths is driven by this number, so the
+   student can set it per subject instead of living with a global default. */
+const SubjectTargetInput = ({ subject, onSaved }) => {
+  const [value, setValue] = useState(subject.targetAttendance || '');
+  const [saving, setSaving] = useState(false);
+  // The latest edited value, kept outside React's batched state so a blur
+  // that arrives in the same tick as the last keystroke still commits it.
+  const latest = useRef(subject.targetAttendance || '');
+
+  useEffect(() => {
+    latest.current = subject.targetAttendance || '';
+    setValue(subject.targetAttendance || '');
+  }, [subject._id, subject.targetAttendance]);
+
+  const commit = async () => {
+    const raw = String(latest.current).trim();
+    // Empty = back to the user's default from Settings.
+    if (raw === '' || subject.targetAttendance === Number(raw)) return;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 50 || n > 100) return;
+    setSaving(true);
+    try {
+      await API.put(`/academics/subjects/${subject._id}`, { targetAttendance: n });
+      onSaved?.();
+    } catch {
+      /* the card re-renders with stored data; a failed save is silent here */
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <span className="inline-flex items-baseline gap-0.5">
+      <input
+        type="number"
+        min="50"
+        max="100"
+        value={value}
+        disabled={saving}
+        aria-label={`Attendance target for ${subject.name}`}
+        onChange={(e) => {
+          latest.current = e.target.value;
+          setValue(e.target.value);
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+        }}
+        className="w-10 rounded border border-transparent bg-transparent px-0.5 text-2xs tabular-nums font-medium text-ink-700 hover:border-line-strong focus:border-accent focus:bg-surface focus:outline-none"
+      />
+      %
+    </span>
+  );
+};
+
+export const AttendanceSection = ({ overview, onChanged }) => {
   const [tab, setTab] = useState('today'); // 'today' | 'history' | 'summary'
   const [date, setDate] = useState(today);
   const [openDetails, setOpenDetails] = useState(null); // class row with details open
@@ -432,7 +488,7 @@ export const AttendanceSection = ({ overview }) => {
                               </span>
                             )}
                             <span className="inline-flex items-baseline gap-1">
-                              Target <span className="tabular-nums font-medium text-ink-700">{s.targetAttendance || 75}%</span>
+                              Target <SubjectTargetInput subject={s} onSaved={onChanged} />
                             </span>
                           </div>
                         </div>

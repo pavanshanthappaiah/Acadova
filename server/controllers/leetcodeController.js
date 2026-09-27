@@ -199,8 +199,8 @@ export const getDashboard = async (req, res) => {
     };
 
     const [lcRows, manualRows] = await Promise.all([
-      LeetCodeSolvedProblem.find(lcQuery).select({ difficulty: 1, solvedAt: 1, language: 1 }).lean(),
-      CodingProblem.find(manualQuery).select({ difficulty: 1, date: 1, timeSpentMinutes: 1 }).lean(),
+      LeetCodeSolvedProblem.find(lcQuery).select({ title: 1, slug: 1, url: 1, difficulty: 1, solvedAt: 1, language: 1 }).lean(),
+      CodingProblem.find(manualQuery).select({ title: 1, difficulty: 1, date: 1, timeSpentMinutes: 1 }).lean(),
     ]);
 
     // Manual rows may include days outside the window when the range is not
@@ -214,6 +214,22 @@ export const getDashboard = async (req, res) => {
     const difficultyCounts = { easy: 0, medium: 0, hard: 0 };
     const languageCounts = {};
     let practiceMinutes = 0;
+
+    // Problem identities for the period, newest first (used by the Problems
+    // page to show WHAT was solved, not only how many). Sorted by solved time;
+    // a slug collision cannot occur (unique per user + slug).
+    const syncedProblems = lcRows
+      .slice()
+      .sort((a, b) => new Date(b.solvedAt) - new Date(a.solvedAt))
+      .map((r) => ({
+        title: r.title || r.slug || 'Untitled problem',
+        slug: r.slug || null,
+        url: r.url || (r.slug ? `https://leetcode.com/problems/${r.slug}/` : null),
+        difficulty: r.difficulty || 'unknown',
+        language: r.language || null,
+        solvedAt: r.solvedAt,
+        source: 'leetcode',
+      }));
 
     for (const row of lcRows) {
       const key = new Date(row.solvedAt).toISOString().slice(0, 10);
@@ -284,6 +300,7 @@ export const getDashboard = async (req, res) => {
       },
       difficulty: difficultyCounts,
       languages: Object.entries(languageCounts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+      syncedProblems,
       dailyActivity: daily,
       todayGoal: {
         date: nowLocalDay,

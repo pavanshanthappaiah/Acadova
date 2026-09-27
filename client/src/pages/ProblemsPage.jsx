@@ -398,6 +398,10 @@ export const ProblemsPage = () => {
 
   const difficulty = dashboard?.difficulty || { easy: 0, medium: 0, hard: 0 };
   const difficultyTotal = difficulty.easy + difficulty.medium + difficulty.hard;
+  // What was actually solved in the selected period: synced LeetCode rows
+  // first (with links), then manual logs. Capped so a whole semester never
+  // renders an endless wall.
+  const solvedList = (dashboard?.syncedProblems || []).slice(0, 50);
 
   const problemsSolved = summary?.problemsSolved ?? 0;
   const practiceHours = summary?.practiceHours;
@@ -967,6 +971,55 @@ export const ProblemsPage = () => {
             </Card>
           </Reveal>
         )
+      )}
+
+      {/* ------------------------- solved in this period ------------------------- */}
+      {/* The identities behind the counts above: every LeetCode problem the
+          sync stored for the selected window, newest first. Rendered only
+          when there is something to list — never a padded placeholder. */}
+      {solvedList.length > 0 && (
+        <Reveal>
+          <Card className="p-5 sm:p-6">
+            <SectionHeader
+              title="Solved in this period"
+              description={`${solvedList.length === 1 ? 'Problem' : 'Problems'} synced from LeetCode ${periodPhrase(filter)}${
+                filter.difficulty !== 'all' ? `, ${filter.difficulty} only` : ''
+              }.`}
+              className="mb-4"
+            />
+            <ol className="divide-y divide-line">
+              {solvedList.map((p, i) => (
+                <li key={p.slug || p.url || i} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="w-5 shrink-0 text-right text-2xs tabular-nums text-ink-400">{i + 1}</span>
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-accent" />
+                    {p.url ? (
+                      <a
+                        href={p.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="min-w-0 truncate text-sm font-medium text-ink-900 hover:text-accent-strong hover:underline"
+                      >
+                        {p.title}
+                      </a>
+                    ) : (
+                      <span className="min-w-0 truncate text-sm font-medium text-ink-900">{p.title}</span>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {p.language && <span className="hidden text-2xs text-ink-400 sm:inline">{p.language}</span>}
+                    <Badge tone={p.difficulty === 'easy' ? 'accent' : p.difficulty === 'hard' ? 'danger' : 'neutral'}>
+                      {p.difficulty === 'unknown' ? 'Unknown' : p.difficulty.charAt(0).toUpperCase() + p.difficulty.slice(1)}
+                    </Badge>
+                    <span className="w-14 text-right text-2xs tabular-nums text-ink-400">
+                      {new Date(p.solvedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </Card>
+        </Reveal>
       )}
 
       {/* ------------------------------ log practice modal ------------------------------ */}

@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Info, AlertCircle, CheckCircle2, AlertTriangle } from './Icons';
 
 /* ================================================================== */
@@ -456,8 +457,14 @@ export function Modal({ open, onClose, title, subtitle, children, wide, footer }
     return () => clearTimeout(t);
   }, [open]);
 
+  /* Render through a portal on document.body. Page wrappers keep entrance
+     transforms (page-enter, reveal), and any transformed ancestor becomes the
+     containing block for position: fixed descendants — a modal rendered in
+     place would position against the page frame instead of the viewport and
+     could land below the fold, unreachable while body scroll is locked. A
+     portal detaches the dialog from that subtree entirely. */
   if (!open) return null;
-  return (
+  return createPortal(
     <div
       className="animate-fade-in fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6"
       role="dialog"
@@ -491,7 +498,8 @@ export function Modal({ open, onClose, title, subtitle, children, wide, footer }
         <div className="overflow-y-auto px-5 py-5 sm:px-6">{children}</div>
         {footer && <div className="border-t border-line px-5 py-4 sm:px-6">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

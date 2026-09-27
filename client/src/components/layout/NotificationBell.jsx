@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell } from '../common/Icons';
+import { Bell, X, Trash2 } from '../common/Icons';
 import API from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 
@@ -72,6 +72,28 @@ export const NotificationBell = () => {
     return () => document.removeEventListener('pointerdown', close, true);
   }, [open]);
 
+  const clearAll = async () => {
+    try {
+      await API.delete('/notifications');
+      setItems([]);
+      setUnread(0);
+    } catch {
+      /* silent — the bell must never break the header */
+    }
+  };
+
+  const dismissOne = async (e, id) => {
+    // The row itself is a link; stop it from navigating when dismissing.
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await API.delete('/notifications', { data: { id } });
+      setItems((prev) => prev.filter((n) => n._id !== id));
+    } catch {
+      /* silent */
+    }
+  };
+
   const toggle = async () => {
     const next = !open;
     setOpen(next);
@@ -110,9 +132,20 @@ export const NotificationBell = () => {
         <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-24px)] bg-surface border border-line-strong rounded-lg shadow-card z-50 overflow-hidden">
           <div className="px-3.5 py-2.5 border-b border-line flex items-center justify-between">
             <p className="text-xs font-semibold text-ink-900">Notifications</p>
-            <a href="/settings" className="text-2xs text-accent-strong hover:underline">
-              Settings
-            </a>
+            <div className="flex items-center gap-3">
+              {items.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearAll}
+                  className="flex items-center gap-1 text-2xs text-ink-500 hover:text-danger transition-colors"
+                >
+                  <Trash2 className="h-3 w-3" /> Clear all
+                </button>
+              )}
+              <a href="/settings" className="text-2xs text-accent-strong hover:underline">
+                Settings
+              </a>
+            </div>
           </div>
           <div className="max-h-80 overflow-y-auto divide-y divide-line">
             {items.length === 0 && (
@@ -128,13 +161,21 @@ export const NotificationBell = () => {
                 key={n._id}
                 href={CATEGORY_LINKS[n.category] || n.link || '/'}
                 onClick={() => setOpen(false)}
-                className="block px-3.5 py-2.5 hover:bg-paper-deep/60 transition-colors"
+                className="group relative block px-3.5 py-2.5 pr-10 hover:bg-paper-deep/60 transition-colors"
               >
                 <div className="flex items-start justify-between gap-2">
                   <p className="text-xs font-medium text-ink-900 leading-snug">{n.title}</p>
                   <span className="text-2xs text-ink-400 shrink-0">{timeAgo(n.createdAt)}</span>
                 </div>
                 {n.body && <p className="text-2xs text-ink-500 mt-0.5 leading-snug">{n.body}</p>}
+                <button
+                  type="button"
+                  aria-label={`Dismiss notification: ${n.title}`}
+                  onClick={(e) => dismissOne(e, n._id)}
+                  className="absolute right-2.5 top-2.5 rounded p-1 text-ink-300 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-paper-deep hover:text-ink-900 transition-opacity"
+                >
+                  <X className="h-3 w-3" />
+                </button>
               </a>
             ))}
           </div>

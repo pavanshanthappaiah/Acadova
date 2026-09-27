@@ -10,6 +10,7 @@ import {
   analyzeRepoController,
   toggleProjectMilestone,
   addProjectMilestone,
+  deleteProjectMilestone,
   logProjectHours,
   deleteProject,
   getPracticeGoal,
@@ -37,6 +38,7 @@ router.post('/projects/analyze-repo', analyzeRepoController);
 router.post('/projects', createProject);
 router.post('/projects/:id/milestone', addProjectMilestone);
 router.patch('/projects/:id/milestone', toggleProjectMilestone);
+router.delete('/projects/:id/milestone/:index', deleteProjectMilestone);
 router.patch('/projects/:id/hours', logProjectHours);
 router.delete('/projects/:id', deleteProject);
 

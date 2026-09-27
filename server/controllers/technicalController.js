@@ -306,12 +306,14 @@ export const createProject = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Project title is required' });
     }
 
-    const defaultMilestones = milestones || [
-      { name: 'Architecture & System Design', completed: false, weight: 20 },
-      { name: 'Backend API & Database Schema', completed: false, weight: 30 },
-      { name: 'Frontend UI Implementation', completed: false, weight: 30 },
-      { name: 'Testing & Deployment', completed: false, weight: 20 },
-    ];
+    // Progress points are the student's own plan — never pre-filled. A new
+    // project starts with an empty list and the detail panel shows an
+    // "Add progress point" empty state until they add their own.
+    const ownMilestones = Array.isArray(milestones)
+      ? milestones
+          .filter((m) => m && typeof m.name === 'string' && m.name.trim())
+          .map((m) => ({ name: m.name.trim(), completed: Boolean(m.completed), weight: Number(m.weight) || 20 }))
+      : [];
 
     const project = await Project.create({
       user: req.user.id,
@@ -322,7 +324,7 @@ export const createProject = async (req, res) => {
       liveDemoUrl: liveDemoUrl || '',
       deadline: deadline || '',
 
-      milestones: defaultMilestones,
+      milestones: ownMilestones,
       progress: 0,
       totalHoursSpent: 0,
     });
@@ -389,13 +391,48 @@ export const addProjectMilestone = async (req, res) => {
   }
 };
 
+export const deleteProjectMilestone = async (req, res) => {
+  try {
+    const index = Number(req.params.index);
+    const project = await Project.findOne({ _id: req.params.id, user: req.user.id });
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+    if (!Number.isInteger(index) || index < 0 || index >= project.milestones.length) {
+      return res.status(400).json({ success: false, message: 'Invalid progress point' });
+    }
+
+    project.milestones.splice(index, 1);
+
+    // Same recompute as toggle and add: weight share of completed points.
+    const totalWeight = project.milestones.reduce((acc, m) => acc + (m.weight || 25), 0);
+    const completedWeight = project.milestones
+      .filter((m) => m.completed)
+      .reduce((acc, m) => acc + (m.weight || 25), 0);
+    project.progress = totalWeight > 0 ? Math.round((completedWeight / totalWeight) * 100) : 0;
+    if (project.milestones.length === 0) project.progress = 0;
+    if (project.progress === 100) project.status = 'completed';
+    else if (project.status === 'completed') project.status = 'in_progress';
+
+    await project.save();
+    return res.status(200).json({ success: true, project });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 export const logProjectHours = async (req, res) => {
   try {
     const { hours } = req.body;
+    // Validate before touching stored totals: garbage input must never mutate
+    // real records (the old fallback silently logged 1 hour for any junk, and
+    // negative or non-numeric values passed straight through).
+    const value = Number(hours);
+    if (!Number.isFinite(value) || value <= 0 || value > 1000) {
+      return res.status(400).json({ success: false, message: 'Hours must be a number greater than zero.' });
+    }
     const project = await Project.findOne({ _id: req.params.id, user: req.user.id });
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
 
-    project.totalHoursSpent += Number(hours) || 1;
+    project.totalHoursSpent += value;
     await project.save();
 
     return res.status(200).json({ success: true, project });

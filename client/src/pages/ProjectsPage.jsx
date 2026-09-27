@@ -74,6 +74,7 @@ export const ProjectsPage = () => {
   const [techFilter, setTechFilter] = useState('all');
   const [selectedId, setSelectedId] = useState(null);
   const [menuFor, setMenuFor] = useState(null); // overflow menu (project id)
+  const [menuUp, setMenuUp] = useState(false); // open the menu above its button
   const menuWrapRef = useRef(null); // wrapper element of the OPEN overflow menu
 
   // Overflow menu closes on outside tap or Esc, like every other popover in the app.
@@ -264,6 +265,19 @@ export const ProjectsPage = () => {
 
   const runDelete = async () => {
     if (!confirm) return;
+    // A confirm payload with an `index` removes one progress point; without
+    // one it deletes the whole project.
+    if (typeof confirm.index === 'number') {
+      try {
+        await API.delete(`/technical/projects/${confirm.id}/milestone/${confirm.index}`);
+        setConfirm(null);
+        await fetchOverview();
+      } catch (err) {
+        setConfirm(null);
+        setLoadError(err.response?.data?.message || 'Could not remove that progress point.');
+      }
+      return;
+    }
     try {
       await API.delete(`/technical/projects/${confirm.id}`);
       setConfirm(null);
@@ -558,26 +572,38 @@ export const ProjectsPage = () => {
                       {proj.goal && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-ink-500">{proj.goal}</p>}
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                  <div className="relative flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                     <button
                       type="button"
                       aria-label={`Actions for ${proj.title}`}
                       aria-expanded={menuFor === proj._id}
                       aria-haspopup="menu"
-                      onClick={() => setMenuFor(menuFor === proj._id ? null : proj._id)}
-                      className="pressable relative rounded p-1.5 text-ink-400 hover:bg-paper-deep hover:text-ink-900"
+                      onClick={(e) => {
+                        // Flip the menu above its button when there is no room
+                        // below: cards in the bottom row sit near the viewport
+                        // edge, where a downward menu paints off-screen. The
+                        // menu is roughly 140px tall with all four actions.
+                        if (menuFor !== proj._id) {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setMenuUp(window.innerHeight - rect.bottom < 150);
+                        }
+                        setMenuFor(menuFor === proj._id ? null : proj._id);
+                      }}
+                      className="pressable rounded p-1.5 text-ink-400 hover:bg-paper-deep hover:text-ink-900"
                     >
                       <MoreHorizontal className="h-4 w-4" />
                     </button>
-                  </div>
-                </div>
-
-                {menuFor === proj._id && (
-                  <div
-                    className="animate-pop-in absolute right-4 top-12 z-20 w-44 rounded-md border border-line bg-surface py-1 text-xs shadow-lift"
-                    role="menu"
-                    onClick={(e) => e.stopPropagation()}
-                  >
+                    {menuFor === proj._id && (
+                      /* Anchored to the ellipsis button (this wrapper is its
+                         positioning parent), flipped above the button when the
+                         viewport has no room below it. */
+                      <div
+                        className={`animate-pop-in absolute right-0 z-20 w-44 rounded-md border border-line bg-surface py-1 text-xs shadow-lift ${
+                          menuUp ? 'bottom-full mb-1' : 'top-full mt-1'
+                        }`}
+                        role="menu"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                     {proj.githubUrl && (
                       <a
                         href={proj.githubUrl}
@@ -624,8 +650,10 @@ export const ProjectsPage = () => {
                     >
                       <Trash2 className="h-3.5 w-3.5" /> Delete project
                     </button>
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
 
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <Badge tone={statusMeta(proj.status).tone}>{statusMeta(proj.status).label}</Badge>
@@ -823,11 +851,27 @@ export const ProjectsPage = () => {
                         <td className="px-3 py-2.5 text-center text-2xs tabular-nums text-ink-400">{idx + 1}</td>
                         <td className="px-3 py-2.5 text-ink-900 break-words">{m.name}</td>
                         <td className="px-3 py-2.5 text-center">
-                          <Checkbox
-                            checked={!!m.completed}
-                            onChange={() => toggleMilestone(selected._id, idx)}
-                            label={m.completed ? 'Completed' : 'Not completed'}
-                          />
+                          <div className="flex items-center justify-center gap-1">
+                            <Checkbox
+                              checked={!!m.completed}
+                              onChange={() => toggleMilestone(selected._id, idx)}
+                              label={m.completed ? 'Completed' : 'Not completed'}
+                            />
+                            <button
+                              type="button"
+                              aria-label={`Remove progress point ${m.name}`}
+                              onClick={() => setConfirm({
+                                id: selected._id,
+                                index: idx,
+                                title: `Remove “${m.name}”?`,
+                                body: 'This removes the progress point from this project. Hours logged are not affected.',
+                                confirmLabel: 'Remove point',
+                              })}
+                              className="pressable rounded p-1 text-ink-300 hover:bg-danger-soft hover:text-danger"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
