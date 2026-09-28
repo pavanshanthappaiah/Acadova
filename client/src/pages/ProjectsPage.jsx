@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FolderGit2, Plus, Trash2, ExternalLink, Clock, AlertCircle, Github,
-  X, MoreHorizontal, Filter,
+  X, MoreHorizontal, Filter, Pencil,
 } from '../components/common/Icons';
 import API from '../services/api';
 import {
@@ -62,7 +62,15 @@ export const ProjectsPage = () => {
   const [confirm, setConfirm] = useState(null); // { id, title, body, confirmLabel }
   const [hoursTarget, setHoursTarget] = useState(null);
   const [hoursValue, setHoursValue] = useState('1');
+  const [hoursNote, setHoursNote] = useState('');
   const [hoursError, setHoursError] = useState('');
+  // The manage-hours view: the project's dated entries, plus the entry being
+  // edited ({ logId, hours, date, note }) or null when just viewing.
+  const [hoursManage, setHoursManage] = useState(null); // project
+  const [hoursLogs, setHoursLogs] = useState([]);
+  const [hoursLogsLoading, setHoursLogsLoading] = useState(false);
+  const [hoursForm, setHoursForm] = useState(null);
+  const [hoursFormError, setHoursFormError] = useState('');
 
   const [milestoneTarget, setMilestoneTarget] = useState(null);
   const [milestoneName, setMilestoneName] = useState('');
@@ -245,6 +253,14 @@ export const ProjectsPage = () => {
     }
   };
 
+  const openLogHours = (project) => {
+    setHoursTarget(project);
+    setHoursValue('1');
+    setHoursNote('');
+    setHoursError('');
+    setMenuFor(null);
+  };
+
   const submitHours = async (e) => {
     e.preventDefault();
     setHoursError('');
@@ -254,12 +270,67 @@ export const ProjectsPage = () => {
       return;
     }
     try {
-      await API.patch(`/technical/projects/${hoursTarget._id}/hours`, { hours });
+      await API.patch(`/technical/projects/${hoursTarget._id}/hours`, { hours, note: hoursNote.trim() });
       setHoursTarget(null);
       setHoursValue('1');
+      setHoursNote('');
       await fetchOverview();
     } catch (err) {
       setHoursError(err.response?.data?.message || 'Could not log hours.');
+    }
+  };
+
+  // Every dated entry for one project, newest first. The manage view opens
+  // from the project's "Hours logged" figure and from "Log hours" flows.
+  const loadHoursLogs = async (project) => {
+    setHoursManage(project);
+    setHoursLogsLoading(true);
+    setHoursForm(null);
+    setHoursFormError('');
+    try {
+      const res = await API.get(`/technical/projects/${project._id}/hours`);
+      if (res.data?.success) setHoursLogs(res.data.logs || []);
+    } catch {
+      setHoursLogs([]);
+    } finally {
+      setHoursLogsLoading(false);
+    }
+  };
+
+  const openEditHours = (entry) => {
+    setHoursForm({ logId: entry.id, hours: String(entry.hours), date: entry.date, note: entry.note || '' });
+    setHoursFormError('');
+  };
+
+  const submitEditHours = async (e) => {
+    e.preventDefault();
+    setHoursFormError('');
+    const hours = Number(hoursForm.hours);
+    if (!hours || hours <= 0 || hours > 24) {
+      setHoursFormError('Hours must be greater than zero (max 24 per entry).');
+      return;
+    }
+    try {
+      await API.put(`/technical/projects/${hoursManage._id}/hours/${hoursForm.logId}`, {
+        hours,
+        date: hoursForm.date,
+        note: hoursForm.note.trim(),
+      });
+      await loadHoursLogs(hoursManage);
+      await fetchOverview();
+    } catch (err) {
+      setHoursFormError(err.response?.data?.message || 'Could not update that entry.');
+    }
+  };
+
+  const deleteHoursEntry = async (entry) => {
+    setHoursFormError('');
+    try {
+      await API.delete(`/technical/projects/${hoursManage._id}/hours/${entry.id}`);
+      await loadHoursLogs(hoursManage);
+      await fetchOverview();
+    } catch (err) {
+      setHoursFormError(err.response?.data?.message || 'Could not delete that entry.');
     }
   };
 
@@ -628,7 +699,7 @@ export const ProjectsPage = () => {
                     )}
                     <button
                       type="button"
-                      onClick={() => { setHoursTarget(proj); setHoursValue('1'); setHoursError(''); setMenuFor(null); }}
+                      onClick={() => openLogHours(proj)}
                       role="menuitem"
                       className="flex w-full items-center gap-2 px-3 py-2 text-ink-700 hover:bg-paper-deep"
                     >
@@ -805,8 +876,16 @@ export const ProjectsPage = () => {
             </div>
             <div>
               <dt className="text-2xs font-medium uppercase tracking-wide2 text-ink-400">Hours logged</dt>
-              <dd className="mt-1 font-display text-lg font-semibold leading-none text-ink-900">
-                <span className="tabular-nums">{selected.totalHoursSpent || 0}</span>
+              <dd className="mt-1">
+                <button
+                  type="button"
+                  onClick={() => loadHoursLogs(selected)}
+                  title="View and edit logged hours"
+                  className="font-display text-lg font-semibold leading-none text-ink-900 underline decoration-line-strong underline-offset-4 hover:text-accent-strong"
+                >
+                  <span className="tabular-nums">{selected.totalHoursSpent || 0}</span>
+                </button>
+                <p className="mt-1 text-2xs text-ink-400">Tap to view &amp; edit</p>
               </dd>
             </div>
             <div>
@@ -1059,11 +1138,120 @@ export const ProjectsPage = () => {
               onChange={(e) => setHoursValue(e.target.value)}
             />
           </Field>
+          <Field label="What did you work on?" hint="Optional — shown in the hours log.">
+            <Input
+              type="text"
+              maxLength={200}
+              value={hoursNote}
+              onChange={(e) => setHoursNote(e.target.value)}
+              placeholder="e.g. API integration, bug fixing"
+            />
+          </Field>
+          <p className="text-2xs text-ink-400">Logged today. You can correct or delete it from the hours log later.</p>
           <div className="flex justify-end gap-2 pt-2 border-t border-line">
             <Button variant="secondary" onClick={() => setHoursTarget(null)}>Cancel</Button>
             <Button type="submit">Log hours</Button>
           </div>
         </form>
+      </Modal>
+
+      {/* --------------------------- hours log (view / edit) --------------------------- */}
+      <Modal
+        open={!!hoursManage}
+        onClose={() => setHoursManage(null)}
+        title="Hours log"
+        subtitle={hoursManage?.title}
+        wide
+      >
+        <div className="space-y-4">
+          {hoursFormError && <ErrorNote>{hoursFormError}</ErrorNote>}
+          {hoursLogsLoading ? (
+            <p className="py-6 text-center text-sm text-ink-400">Loading…</p>
+          ) : hoursLogs.length === 0 ? (
+            <p className="py-6 text-center text-sm text-ink-500">
+              No dated entries yet — hours logged before this list existed still count toward the total.
+            </p>
+          ) : (
+            <ul className="divide-y divide-line rounded-lg border border-line">
+              {hoursLogs.map((entry) => (
+                <li key={entry.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                  {hoursForm?.logId === entry.id ? (
+                    <form onSubmit={submitEditHours} className="w-full space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <Field label="Hours">
+                          <Input
+                            type="number"
+                            min="0.5"
+                            step="0.5"
+                            value={hoursForm.hours}
+                            onChange={(e) => setHoursForm({ ...hoursForm, hours: e.target.value })}
+                          />
+                        </Field>
+                        <Field label="Date">
+                          <Input
+                            type="date"
+                            value={hoursForm.date}
+                            onChange={(e) => setHoursForm({ ...hoursForm, date: e.target.value })}
+                          />
+                        </Field>
+                      </div>
+                      <Field label="Note">
+                        <Input
+                          type="text"
+                          maxLength={200}
+                          value={hoursForm.note}
+                          onChange={(e) => setHoursForm({ ...hoursForm, note: e.target.value })}
+                        />
+                      </Field>
+                      <div className="flex justify-end gap-2">
+                        <Button type="button" variant="secondary" size="sm" onClick={() => setHoursForm(null)}>
+                          Cancel
+                        </Button>
+                        <Button type="submit" size="sm">Save</Button>
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-ink-900">
+                          <span className="tabular-nums">{entry.hours}</span> hours
+                          <span className="ml-2 font-normal text-ink-400">{mediumDate(entry.date)}</span>
+                        </p>
+                        {entry.note && <p className="mt-0.5 truncate text-xs text-ink-500">{entry.note}</p>}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          aria-label={`Edit ${entry.hours} hour entry`}
+                          onClick={() => openEditHours(entry)}
+                          className="pressable rounded p-1.5 text-ink-400 hover:bg-paper-deep hover:text-ink-900"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete ${entry.hours} hour entry`}
+                          onClick={() => deleteHoursEntry(entry)}
+                          className="pressable rounded p-1.5 text-ink-400 hover:bg-danger-soft hover:text-danger"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="border-t border-line pt-3 text-2xs text-ink-400">
+            Deleting or editing an entry updates the project's total immediately.
+          </p>
+          <div className="flex justify-end">
+            <Button variant="secondary" size="sm" onClick={() => { setHoursManage(null); openLogHours(hoursManage); }}>
+              <Plus className="h-3.5 w-3.5" /> Log more hours
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       {/* --------------------------- add milestone modal --------------------------- */}

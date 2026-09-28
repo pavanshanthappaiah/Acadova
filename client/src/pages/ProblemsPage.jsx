@@ -982,9 +982,9 @@ export const ProblemsPage = () => {
           <Card className="p-5 sm:p-6">
             <SectionHeader
               title="Solved in this period"
-              description={`${solvedList.length === 1 ? 'Problem' : 'Problems'} synced from LeetCode ${periodPhrase(filter)}${
-                filter.difficulty !== 'all' ? `, ${filter.difficulty} only` : ''
-              }.`}
+              description={`${solvedList.length === 1 ? 'Problem' : 'Problems'} from your LeetCode sync and manual logs ${
+                periodPhrase(filter)
+              }${filter.difficulty !== 'all' ? `, ${filter.difficulty} only` : ''}. Manual logs show time spent; LeetCode does not expose it.`}
               className="mb-4"
             />
             <ol className="divide-y divide-line">
@@ -1008,11 +1008,23 @@ export const ProblemsPage = () => {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {p.language && <span className="hidden text-2xs text-ink-400 sm:inline">{p.language}</span>}
+                    {/* Only manual logs carry practice time — synced LeetCode
+                        rows have none, so nothing is invented for them. */}
+                    {p.timeSpentMinutes != null && (
+                      <span
+                        className="text-2xs tabular-nums text-ink-500"
+                        title="Time spent (from your manual log)"
+                      >
+                        {fmtHM(p.timeSpentMinutes)}
+                      </span>
+                    )}
                     <Badge tone={p.difficulty === 'easy' ? 'accent' : p.difficulty === 'hard' ? 'danger' : 'neutral'}>
                       {p.difficulty === 'unknown' ? 'Unknown' : p.difficulty.charAt(0).toUpperCase() + p.difficulty.slice(1)}
                     </Badge>
                     <span className="w-14 text-right text-2xs tabular-nums text-ink-400">
-                      {new Date(p.solvedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      {(p.solvedAt || p.date)
+                        ? new Date(p.solvedAt || p.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                        : ''}
                     </span>
                   </div>
                 </li>

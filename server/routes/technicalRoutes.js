@@ -12,6 +12,9 @@ import {
   addProjectMilestone,
   deleteProjectMilestone,
   logProjectHours,
+  getProjectHourLogs,
+  updateProjectHourLog,
+  deleteProjectHourLog,
   deleteProject,
   getPracticeGoal,
   updatePracticeGoal,
@@ -40,6 +43,9 @@ router.post('/projects/:id/milestone', addProjectMilestone);
 router.patch('/projects/:id/milestone', toggleProjectMilestone);
 router.delete('/projects/:id/milestone/:index', deleteProjectMilestone);
 router.patch('/projects/:id/hours', logProjectHours);
+router.get('/projects/:id/hours', getProjectHourLogs);
+router.put('/projects/:id/hours/:logId', updateProjectHourLog);
+router.delete('/projects/:id/hours/:logId', deleteProjectHourLog);
 router.delete('/projects/:id', deleteProject);
 
 // Daily practice goal

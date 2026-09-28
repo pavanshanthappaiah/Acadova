@@ -165,6 +165,20 @@ const projectSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // Dated hour entries. The running total above stays for quick display,
+    // but every "Log hours" action also records when and how much, so an
+    // entry can be corrected or deleted later without corrupting the total.
+    hourLogs: [
+      {
+        hours: { type: Number, required: true, min: 0.01, max: 24 },
+        date: { type: String, required: true }, // YYYY-MM-DD
+        note: { type: String, default: '', trim: true, maxlength: 200 },
+        loggedAt: { type: Date, default: Date.now },
+      },
+    ],
+    // Hours logged before dated entries existed. Frozen once so the total
+    // survives recalculation from the entry list.
+    inheritedHours: { type: Number, default: 0, min: 0 },
     deadline: {
       type: String,
       default: '',

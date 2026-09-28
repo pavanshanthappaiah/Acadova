@@ -187,10 +187,16 @@ export const getDashboard = async (req, res) => {
       ...(difficulty ? { difficulty } : {}),
     };
     // CodingProblem.date is a YYYY-MM-DD string; build the exact local day set
-    // from the resolved window and filter on it (server-side).
+    // from the resolved window and filter on it (server-side). The days are
+    // labelled in the STUDENT'S calendar — taking the UTC day of a
+    // local-midnight instant shifts everything half a day for timezones like
+    // IST and silently drops morning-logged problems.
+    const tzMinutes = Number(req.query.tzOffsetMinutes);
+    const tz = Number.isFinite(tzMinutes) ? tzMinutes : 0;
+    const localDayKey = (ms) => new Date(ms - tz * 60000).toISOString().slice(0, 10);
     const dayKeys = [];
     for (let ms = runWindow.startMs; ms < runWindow.endMs && dayKeys.length < 400; ms += 86400000) {
-      dayKeys.push(new Date(ms).toISOString().slice(0, 10));
+      dayKeys.push(localDayKey(ms));
     }
     const manualQuery = {
       user: req.user.id,
@@ -200,7 +206,11 @@ export const getDashboard = async (req, res) => {
 
     const [lcRows, manualRows] = await Promise.all([
       LeetCodeSolvedProblem.find(lcQuery).select({ title: 1, slug: 1, url: 1, difficulty: 1, solvedAt: 1, language: 1 }).lean(),
-      CodingProblem.find(manualQuery).select({ title: 1, difficulty: 1, date: 1, timeSpentMinutes: 1 }).lean(),
+      // Manual logs select time too: they are the only source of per-problem
+      // practice minutes, so the solved list can show time next to each row.
+      CodingProblem.find(manualQuery)
+        .select({ title: 1, difficulty: 1, date: 1, timeSpentMinutes: 1, language: 1, createdAt: 1 })
+        .lean(),
     ]);
 
     // Manual rows may include days outside the window when the range is not
@@ -216,23 +226,41 @@ export const getDashboard = async (req, res) => {
     let practiceMinutes = 0;
 
     // Problem identities for the period, newest first (used by the Problems
-    // page to show WHAT was solved, not only how many). Sorted by solved time;
-    // a slug collision cannot occur (unique per user + slug).
-    const syncedProblems = lcRows
-      .slice()
-      .sort((a, b) => new Date(b.solvedAt) - new Date(a.solvedAt))
-      .map((r) => ({
+    // page to show WHAT was solved, not only how many). Merged across both
+    // sources: synced LeetCode rows and manual practice logs. Manual rows are
+    // the only ones carrying time spent, surfaced as `timeSpentMinutes`.
+    const recencyOf = (row) =>
+      row.solvedAt
+        ? new Date(row.solvedAt).getTime()
+        : Date.parse(`${row.date}T12:00:00.000Z`) + (new Date(row.createdAt || 0).getTime() % 86400000);
+    const syncedProblems = [
+      ...lcRows.map((r) => ({
         title: r.title || r.slug || 'Untitled problem',
         slug: r.slug || null,
         url: r.url || (r.slug ? `https://leetcode.com/problems/${r.slug}/` : null),
         difficulty: r.difficulty || 'unknown',
         language: r.language || null,
         solvedAt: r.solvedAt,
+        timeSpentMinutes: null, // LeetCode does not expose per-problem time
         source: 'leetcode',
-      }));
+      })),
+      ...manualInWindow.map((r) => ({
+        title: r.title || 'Untitled problem',
+        slug: null,
+        url: null,
+        difficulty: r.difficulty || 'unknown',
+        language: r.language || null,
+        solvedAt: null,
+        date: r.date,
+        timeSpentMinutes: r.timeSpentMinutes || null,
+        source: 'manual',
+      })),
+    ].sort((a, b) => recencyOf(b) - recencyOf(a));
 
     for (const row of lcRows) {
-      const key = new Date(row.solvedAt).toISOString().slice(0, 10);
+      // Bucket by the student's LOCAL day, not the UTC day, so a solve after
+      // local midnight lands in the day the student actually practised.
+      const key = localDayKey(new Date(row.solvedAt).getTime());
       const bucket = dailyIndex.get(key);
       if (bucket) bucket.problems += 1;
       if (row.difficulty in difficultyCounts) difficultyCounts[row.difficulty] += 1;
@@ -249,8 +277,6 @@ export const getDashboard = async (req, res) => {
     }
 
     // ---- today's goal: ALWAYS today's actual data, regardless of filter ----
-    const tzMinutes = Number(req.query.tzOffsetMinutes);
-    const tz = Number.isFinite(tzMinutes) ? tzMinutes : 0;
     const nowLocalDay = new Date(Date.now() - tz * 60000).toISOString().slice(0, 10);
     // Today's local-midnight window expressed in UTC instants.
     const todayStartMs = Date.parse(`${nowLocalDay}T00:00:00.000Z`) + tz * 60000;

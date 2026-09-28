@@ -10,8 +10,7 @@ import {
 } from '../models/Academic.js';
 import { syncUserReminders } from '../services/notificationEngine.js';
 import {
-  localDateStr,
-  localMinutesOfDay,
+  studentNow,
   toMinutes,
   evaluateLock,
   lockMessage,
@@ -892,7 +891,9 @@ const getDayName = (dateStr) => {
 // @route   GET /api/academics/today?date=YYYY-MM-DD
 export const getTodaysClasses = async (req, res) => {
   try {
-    const targetDate = req.query.date || new Date().toISOString().split('T')[0];
+    // The browser's own day/now, not the server's (Render runs UTC).
+    const { today: serverToday, nowMinutes } = studentNow(req.query.tzOffsetMinutes);
+    const targetDate = req.query.date || serverToday;
     const dayName = getDayName(targetDate);
     const activeSemester = await getOrCreateActiveSemester(req.user.id);
     const isWithinSemester = !!activeSemester &&
@@ -961,8 +962,7 @@ export const getTodaysClasses = async (req, res) => {
 
     // Attendance can only be recorded once the session has finished; the lock
     // state travels with each class so the UI matches what the API enforces.
-    const todayLocal = localDateStr();
-    const nowMinutes = localMinutesOfDay();
+    const todayLocal = serverToday;
 
     const classesWithStatus = slots
       .filter((s) => s.subject)
@@ -1019,8 +1019,11 @@ export const markTimetableAttendance = async (req, res) => {
       });
     }
 
-    const todayStr = date || localDateStr();
-    const serverToday = localDateStr();
+    // The student's own "today" — a browser-supplied timezone offset keeps
+    // late-evening IST marking from counting against the UTC day.
+    const serverToday = studentNow(req.body.tzOffsetMinutes).today;
+
+    const todayStr = date || serverToday;
 
     // Strictly disallow future date marking
     if (todayStr > serverToday) {
@@ -1050,7 +1053,7 @@ export const markTimetableAttendance = async (req, res) => {
         date: todayStr,
         threshold: toMinutes(endTime),
         today: serverToday,
-        nowMinutes: localMinutesOfDay(),
+        nowMinutes: studentNow(req.body.tzOffsetMinutes).nowMinutes,
       });
 
       if (lock.locked) {

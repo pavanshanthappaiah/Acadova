@@ -4,15 +4,26 @@ import { Assignment, Exam, Subject, ClassSession } from '../models/Academic.js';
 import { CodingProblem, Project } from '../models/TechnicalGrowth.js';
 import { LeetCodeSolvedProblem } from '../models/LeetCode.js';
 import { computeSubjectAttendance } from './academicController.js';
+import { tzOrNull } from '../utils/time.js';
 
 // Helper to format a date as YYYY-MM-DD in the student's LOCAL calendar.
-// toISOString() would hand back the UTC day, which is the wrong day for part
-// of the world (in India, from midnight to 05:30 local it would read yesterday).
-const formatDate = (date) => {
+// Every request carries the browser's getTimezoneOffset() (see the axios
+// interceptor in client/src/services/api.js); with no offset (tests, curl)
+// we fall back to server-local. toISOString() alone would hand back the UTC
+// day, which is the wrong day for part of the world (in India, from midnight
+// to 05:30 local it would read yesterday).
+const formatDate = (date, tzOffsetMinutes = null) => {
   const d = date || new Date();
+  const tz = tzOrNull(tzOffsetMinutes);
+  if (tz != null) {
+    return new Date(d.getTime() - tz * 60000).toISOString().slice(0, 10);
+  }
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
+
+// The student's timezone offset, sent by the browser with every request.
+const reqTz = (req) => req.query?.tzOffsetMinutes ?? req.body?.tzOffsetMinutes ?? null;
 
 /**
  * Consecutive-day run ending today (or yesterday, when today is not logged
@@ -48,12 +59,13 @@ const dayWindow = (localDayStr) => {
 // @route   GET /api/productivity/radar
 export const getDeadlineRadar = async (req, res) => {
   try {
+    const tz = reqTz(req);
     const today = new Date();
-    const todayStr = formatDate(today);
+    const todayStr = formatDate(today, tz);
 
     const sevenDaysLater = new Date();
     sevenDaysLater.setDate(today.getDate() + 7);
-    const sevenDaysStr = formatDate(sevenDaysLater);
+    const sevenDaysStr = formatDate(sevenDaysLater, tz);
 
     // Fetch assignments, exams, and projects
     const [assignments, exams, projects] = await Promise.all([
@@ -117,11 +129,11 @@ export const getDeadlineRadar = async (req, res) => {
     // Group into Urgency buckets: Today/Tomorrow (<24h), 2-3 Days, 4-7 Days
     const tomorrow = new Date();
     tomorrow.setDate(today.getDate() + 1);
-    const tomorrowStr = formatDate(tomorrow);
+    const tomorrowStr = formatDate(tomorrow, tz);
 
     const threeDays = new Date();
     threeDays.setDate(today.getDate() + 3);
-    const threeDaysStr = formatDate(threeDays);
+    const threeDaysStr = formatDate(threeDays, tz);
 
     const urgencyBuckets = {
       imminent: items.filter((i) => i.date <= tomorrowStr), // Today & Tomorrow
@@ -144,9 +156,10 @@ export const getDeadlineRadar = async (req, res) => {
 // @route   GET /api/productivity/time-leaks
 export const getTimeLeaks = async (req, res) => {
   try {
+    const tz = reqTz(req);
     const fourteenDaysAgo = new Date();
     fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-    const startDateStr = formatDate(fourteenDaysAgo);
+    const startDateStr = formatDate(fourteenDaysAgo, tz);
 
     const activities = await Activity.find({
       user: req.user.id,
@@ -221,7 +234,8 @@ export const getTimeLeaks = async (req, res) => {
 // @route   GET /api/productivity/consistency
 export const getConsistencyStreaks = async (req, res) => {
   try {
-    const todayStr = formatDate(new Date());
+    const tz = reqTz(req);
+    const todayStr = formatDate(new Date(), tz);
 
     // --- DSA coding streak ---
     // Two sources feed one streak: LeetCode syncs (solvedAt is a UTC Date)
@@ -232,7 +246,7 @@ export const getConsistencyStreaks = async (req, res) => {
       CodingProblem.find({ user: req.user.id }).select('date').lean(),
     ]);
     const codingDays = new Set();
-    lcRows.forEach((r) => r.solvedAt && codingDays.add(formatDate(new Date(r.solvedAt))));
+    lcRows.forEach((r) => r.solvedAt && codingDays.add(formatDate(new Date(r.solvedAt), tz)));
     manualRows.forEach((r) => r.date && codingDays.add(r.date));
     const codingStreak = currentStreakOf(codingDays, todayStr);
 
@@ -301,10 +315,11 @@ export const getConsistencyStreaks = async (req, res) => {
 // @route   GET /api/productivity/attention
 export const getAttentionRequired = async (req, res) => {
   try {
-    const todayStr = formatDate(new Date());
+    const tz = reqTz(req);
+    const todayStr = formatDate(new Date(), tz);
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = formatDate(tomorrow);
+    const tomorrowStr = formatDate(tomorrow, tz);
 
     const attentionItems = [];
 
@@ -379,7 +394,7 @@ export const submitDailyCheckout = async (req, res) => {
     const { date, completedItems, missedItems, energyLevel, tomorrowPriority, reflectionNotes } =
       req.body;
 
-    const todayStr = date || formatDate(new Date());
+    const todayStr = date || formatDate(new Date(), reqTz(req));
 
     const review = await DailyReview.findOneAndUpdate(
       { user: req.user.id, date: todayStr },
@@ -409,10 +424,11 @@ export const submitDailyCheckout = async (req, res) => {
 // @route   GET /api/productivity/weekly-review
 export const getWeeklyReview = async (req, res) => {
   try {
+    const tz = reqTz(req);
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const startDateStr = formatDate(sevenDaysAgo);
-    const todayStr = formatDate(new Date());
+    const startDateStr = formatDate(sevenDaysAgo, tz);
+    const todayStr = formatDate(new Date(), tz);
 
     const activities = await Activity.find({
       user: req.user.id,

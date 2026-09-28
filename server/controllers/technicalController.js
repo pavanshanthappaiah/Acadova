@@ -1,6 +1,37 @@
 import { CodingProblem, Skill, Project, PracticeGoal } from '../models/TechnicalGrowth.js';
 import { syncUserReminders } from '../services/notificationEngine.js';
 import { analyzeRepo, parseGithubUrl } from '../services/repoAnalyzer.js';
+import { dateStrInTz } from '../utils/time.js';
+
+// @desc    List a project's dated hours entries (newest first)
+// @route   GET /api/technical/projects/:id/hours
+export const getProjectHourLogs = async (req, res) => {
+  try {
+    const project = await Project.findOne({ _id: req.params.id, user: req.user.id })
+      .select('title totalHoursSpent inheritedHours hourLogs')
+      .lean();
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    const logs = (project.hourLogs || [])
+      .slice()
+      .sort(
+        (a, b) =>
+          String(b.date).localeCompare(String(a.date)) || new Date(b.loggedAt) - new Date(a.loggedAt)
+      )
+      .map((l) => ({ id: l._id, hours: l.hours, date: l.date, note: l.note || '', loggedAt: l.loggedAt }));
+
+    return res.status(200).json({
+      success: true,
+      projectId: project._id,
+      title: project.title,
+      totalHoursSpent: project.totalHoursSpent || 0,
+      inheritedHours: project.inheritedHours || 0,
+      logs,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
 
 const ALL_TOPICS = [
   'Arrays',
@@ -421,7 +452,7 @@ export const deleteProjectMilestone = async (req, res) => {
 
 export const logProjectHours = async (req, res) => {
   try {
-    const { hours } = req.body;
+    const { hours, note } = req.body;
     // Validate before touching stored totals: garbage input must never mutate
     // real records (the old fallback silently logged 1 hour for any junk, and
     // negative or non-numeric values passed straight through).
@@ -432,7 +463,82 @@ export const logProjectHours = async (req, res) => {
     const project = await Project.findOne({ _id: req.params.id, user: req.user.id });
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
 
-    project.totalHoursSpent += value;
+    // Legacy projects logged hours before dated entries existed: freeze their
+    // running total as the inherited base so it survives future recalcs.
+    if (project.hourLogs.length === 0 && !project.inheritedHours && project.totalHoursSpent > 0) {
+      project.inheritedHours = project.totalHoursSpent;
+    }
+
+    // Dated on the student's wall clock (the browser sends its offset with
+    // every request); on a UTC server `toLocaleDateString` would put the
+    // entry on the previous day for any log made before 5:30 AM IST.
+    const todayStr = dateStrInTz(new Date(), req.body.tzOffsetMinutes);
+    project.hourLogs.push({ hours: value, date: todayStr, note: String(note || '').trim().slice(0, 200) });
+    recalcProjectHours(project);
+    await project.save();
+
+    return res.status(200).json({ success: true, project });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Rebuild totalHoursSpent from the dated log entries — the one source of
+ * truth for a project's hours. Legacy totals (logged before entries
+ * existed) are preserved as an `inheritedHours` base so old data keeps
+ * reading correctly after an edit.
+ */
+const recalcProjectHours = (project) => {
+  const logged = project.hourLogs.reduce((acc, l) => acc + (Number(l.hours) || 0), 0);
+  const base = Number.isFinite(project.inheritedHours) ? project.inheritedHours : 0;
+  project.totalHoursSpent = Math.round((base + logged) * 100) / 100;
+};
+
+// @desc    Edit one logged-hours entry on a project
+// @route   PUT /api/technical/projects/:id/hours/:logId
+export const updateProjectHourLog = async (req, res) => {
+  try {
+    const { hours, date, note } = req.body;
+    const value = Number(hours);
+    if (!Number.isFinite(value) || value <= 0 || value > 24) {
+      return res.status(400).json({ success: false, message: 'Hours must be a number greater than zero (max 24 per entry).' });
+    }
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
+      return res.status(400).json({ success: false, message: 'Date must be in YYYY-MM-DD format.' });
+    }
+
+    const project = await Project.findOne({ _id: req.params.id, user: req.user.id });
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    const entry = project.hourLogs.id(req.params.logId);
+    if (!entry) return res.status(404).json({ success: false, message: 'Hours entry not found' });
+
+    entry.hours = value;
+    if (date !== undefined) entry.date = date;
+    if (note !== undefined) entry.note = String(note).trim().slice(0, 200);
+
+    recalcProjectHours(project);
+    await project.save();
+
+    return res.status(200).json({ success: true, project });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Delete one logged-hours entry on a project
+// @route   DELETE /api/technical/projects/:id/hours/:logId
+export const deleteProjectHourLog = async (req, res) => {
+  try {
+    const project = await Project.findOne({ _id: req.params.id, user: req.user.id });
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+
+    const entry = project.hourLogs.id(req.params.logId);
+    if (!entry) return res.status(404).json({ success: false, message: 'Hours entry not found' });
+
+    entry.deleteOne();
+    recalcProjectHours(project);
     await project.save();
 
     return res.status(200).json({ success: true, project });

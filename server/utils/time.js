@@ -14,6 +14,42 @@ export const localDateStr = (d = new Date()) =>
 export const localMinutesOfDay = (d = new Date()) => d.getHours() * 60 + d.getMinutes();
 
 /**
+ * Everything above works in the server's *local* calendar. In production the
+ * server may not share the student's wall clock at all (Render runs UTC, the
+ * student runs IST) — so every request also carries the browser's
+ * `new Date().getTimezoneOffset()` as `tzOffsetMinutes` (IST = -330). The
+ * helpers below turn that into the student's own "today" and "now".
+ * When no offset is supplied (tests, curl) they fall back to server-local.
+ */
+
+/** `tzOffsetMinutes` from a request, or null when absent/invalid. */
+export const tzOrNull = (tzOffsetMinutes) => {
+  const n = Number(tzOffsetMinutes);
+  return Number.isFinite(n) ? n : null;
+};
+
+/** Calendar date `YYYY-MM-DD` of instant `d` in the student's timezone. */
+export const dateStrInTz = (d = new Date(), tzOffsetMinutes = null) => {
+  const tz = tzOrNull(tzOffsetMinutes);
+  if (tz == null) return localDateStr(d);
+  return new Date(d.getTime() - tz * 60000).toISOString().slice(0, 10);
+};
+
+/** Minutes since midnight of instant `d` on the student's wall clock. */
+export const minutesOfDayInTz = (d = new Date(), tzOffsetMinutes = null) => {
+  const tz = tzOrNull(tzOffsetMinutes);
+  if (tz == null) return localMinutesOfDay(d);
+  const shifted = new Date(d.getTime() - tz * 60000);
+  return shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
+};
+
+/** The two values every lock/gate decision needs, in the student's clock. */
+export const studentNow = (tzOffsetMinutes = null, d = new Date()) => ({
+  today: dateStrInTz(d, tzOffsetMinutes),
+  nowMinutes: minutesOfDayInTz(d, tzOffsetMinutes),
+});
+
+/**
  * Parse a schedule time into minutes since midnight.
  * Accepts "HH:MM", "H:MM", and the 12-hour variants the data model allows
  * ("07:15 AM", "9:30 pm"). Returns null when the value is unusable, which

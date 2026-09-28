@@ -2,8 +2,8 @@ import { CustomRoutine, RoutineCompletion, RoutineCategory } from '../models/Rou
 import { syncUserReminders } from '../services/notificationEngine.js';
 import { Semester, TimetableSlot, SemesterException, ClassSession } from '../models/Academic.js';
 import {
-  localDateStr,
-  localMinutesOfDay,
+  studentNow,
+  dateStrInTz,
   toMinutes,
   evaluateLock,
   lockMessage,
@@ -250,10 +250,11 @@ const buildDayItems = (ctx, date, { today, nowMinutes, flexibleGateMessage = nul
 // @route   GET /api/routines?date=YYYY-MM-DD
 export const getRoutinesForDate = async (req, res) => {
   try {
-    const todayStr = req.query.date || localDateStr();
+    // Lock state must follow the student's wall clock (the browser sends its
+    // getTimezoneOffset); without it we fall back to server-local time.
+    const { today, nowMinutes } = studentNow(req.query.tzOffsetMinutes);
+    const todayStr = req.query.date || today;
     const dayOfWeek = getDayName(todayStr);
-    const today = localDateStr();
-    const nowMinutes = localMinutesOfDay();
 
     // `?scope=all` reports every routine the student owns, regardless of
     // whether it falls on the requested date. Onboarding/setup UI uses it to
@@ -406,7 +407,7 @@ export const createRoutine = async (req, res) => {
       notes: notes ? notes.trim() : '',
       isRecurring: !!isRecurring,
       recurrenceDays: Array.isArray(recurrenceDays) ? recurrenceDays : [],
-      date: date || localDateStr(),
+      date: date || dateStrInTz(new Date(), req.body.tzOffsetMinutes),
     });
 
     syncUserReminders(req.user.id).catch(() => {}); // new routine → schedule its reminders
@@ -487,9 +488,9 @@ export const deleteRoutine = async (req, res) => {
 // @route   POST /api/routines/:id/toggle
 export const toggleRoutineCompletion = async (req, res) => {
   try {
-    const { date, completed } = req.body;
-    const targetDate = date || localDateStr();
-    const today = localDateStr();
+    const { date, completed, tzOffsetMinutes } = req.body;
+    const { today, nowMinutes: nowMin } = studentNow(tzOffsetMinutes);
+    const targetDate = date || today;
 
     const routine = await CustomRoutine.findOne({ _id: req.params.id, user: req.user.id });
     if (!routine) {
@@ -504,7 +505,7 @@ export const toggleRoutineCompletion = async (req, res) => {
         date: targetDate,
         threshold: effectiveEnd(routine.endTime, routine.startTime),
         today,
-        nowMinutes: localMinutesOfDay(),
+        nowMinutes: nowMin,
       });
 
       if (lock.locked) {
@@ -567,9 +568,8 @@ export const toggleRoutineCompletion = async (req, res) => {
 // @route   GET /api/routines/combined-daily?date=YYYY-MM-DD
 export const getCombinedDailyTimeline = async (req, res) => {
   try {
-    const targetDate = req.query.date || localDateStr();
-    const today = localDateStr();
-    const nowMinutes = localMinutesOfDay();
+    const { today, nowMinutes } = studentNow(req.query.tzOffsetMinutes);
+    const targetDate = req.query.date || today;
 
     const ctx = await loadScheduleContext(req.user.id, [targetDate]);
     // One gate decision per request — buildDayItems stamps every flexible
@@ -603,9 +603,8 @@ export const getCombinedDailyTimeline = async (req, res) => {
 // @route   GET /api/routines/analytics?date=YYYY-MM-DD
 export const getRoutineAnalytics = async (req, res) => {
   try {
-    const anchor = req.query.date || localDateStr();
-    const today = localDateStr();
-    const nowMinutes = localMinutesOfDay();
+    const { today, nowMinutes } = studentNow(req.query.tzOffsetMinutes);
+    const anchor = req.query.date || today;
 
     const weekDates = datesInWeek(anchor);
     const monthDates = datesInMonth(anchor);
